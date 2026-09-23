@@ -1,25 +1,24 @@
 package com.sxx.vendingcronetoff
 
 import android.os.Process
-import de.robv.android.xposed.IXposedHookLoadPackage
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XC_MethodReplacement
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam
+import android.util.Log
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface
+import java.lang.reflect.Executable
 import java.lang.reflect.Modifier
 import java.util.Locale
 import kotlin.math.min
 
 /**
  * Disable Play Store's Cronet path in com.android.vending.
- * 
+ *
  * This module avoids crashes from ROM/APEX Cronet (e.g. /apex/.../libcronet.*.so)
  * by blocking HttpEngine/Cronet provider entry points and forcing fallback transport.
  */
-class MainHook : IXposedHookLoadPackage {
-    override fun handleLoadPackage(lpparam: LoadPackageParam) {
-        if ("com.android.vending" != lpparam.packageName) {
+class MainHook : XposedModule() {
+
+    override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
+        if ("com.android.vending" != param.packageName) {
             return
         }
 
@@ -27,13 +26,13 @@ class MainHook : IXposedHookLoadPackage {
 
         hookHttpEngineBuild()
 
-        hookHttpEngineNativeProvider(lpparam)
+        hookHttpEngineNativeProvider(param.classLoader)
 
-        hookNativeCronetProvider(lpparam)
+        hookNativeCronetProvider(param.classLoader)
 
-        hookAppCronetBuilders(lpparam)
+        hookAppCronetBuilders(param.classLoader)
 
-        dumpAndHookProviderHierarchy(lpparam)
+        dumpAndHookProviderHierarchy(param.classLoader)
     }
 
     private fun hookHttpEngineBuild() {
@@ -54,9 +53,9 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    private fun hookHttpEngineNativeProvider(lpparam: LoadPackageParam) {
+    private fun hookHttpEngineNativeProvider(classLoader: ClassLoader) {
         val className = "org.chromium.net.impl.HttpEngineNativeProvider"
-        val clazz = XposedHelpers.findClassIfExists(className, lpparam.classLoader)
+        val clazz = findClass(classLoader, className)
         if (clazz == null) {
             log("Phase2: $className not found in app classloader")
             return
@@ -72,10 +71,10 @@ class MainHook : IXposedHookLoadPackage {
 
             val ret = m.returnType
 
-            if (ret == Boolean::class.javaPrimitiveType && m.parameterTypes.size == 0) {
+            if (ret == Boolean::class.javaPrimitiveType && m.parameterTypes.isEmpty()) {
                 // isEnabled() or obfuscated boolean -> false
                 try {
-                    XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false))
+                    hook(m as Executable).intercept { false }
                     hookedBool++
                     log("Phase2: $className#$name() -> false")
                 } catch (t: Throwable) {
@@ -84,38 +83,35 @@ class MainHook : IXposedHookLoadPackage {
             } else {
                 // All other methods -> return null/default
                 try {
-                    XposedBridge.hookMethod(m, object : XC_MethodReplacement() {
-                        override fun replaceHookedMethod(param: MethodHookParam?): Any? {
-                            log(
-                                ("Phase2: blocked " + className + "#" + name
-                                        + "() ret=" + ret.name)
-                            )
-                            return getDefaultValue(ret)
-                        }
-                    })
+                    hook(m as Executable).intercept {
+                        log("Phase2: blocked $className#$name() ret=${ret.name}")
+                        getDefaultValue(ret)
+                    }
                     hookedOther++
                 } catch (t: Throwable) {
-                    log("Phase2: failed hooking " + className + "#" + name + ": " + t.message)
+                    log("Phase2: failed hooking $className#$name: ${t.message}")
                 }
             }
         }
 
-        try {
-            XposedBridge.hookAllConstructors(clazz, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam?) {
+        for (ctor in clazz.declaredConstructors) {
+            try {
+                hook(ctor as Executable).intercept { chain ->
+                    val res = chain.proceed()
                     log("Phase2: HttpEngineNativeProvider constructed")
                     logStackBrief()
+                    res
                 }
-            })
-        } catch (_: Throwable) {
+            } catch (_: Throwable) {
+            }
         }
 
         log("Phase2: HttpEngineNativeProvider hooked: $hookedBool bool, $hookedOther other")
     }
 
-    private fun hookNativeCronetProvider(lpparam: LoadPackageParam) {
+    private fun hookNativeCronetProvider(classLoader: ClassLoader) {
         val className = "org.chromium.net.impl.NativeCronetProvider"
-        val clazz = XposedHelpers.findClassIfExists(className, lpparam.classLoader)
+        val clazz = findClass(classLoader, className)
         if (clazz == null) {
             log("Phase3: $className not found")
             return
@@ -133,7 +129,7 @@ class MainHook : IXposedHookLoadPackage {
 
             if (ret == Boolean::class.javaPrimitiveType && m.parameterTypes.isEmpty()) {
                 try {
-                    XposedBridge.hookMethod(m, XC_MethodReplacement.returnConstant(false))
+                    hook(m as Executable).intercept { false }
                     hookedBool++
                     log("Phase3: $className#$name() -> false")
                 } catch (t: Throwable) {
@@ -141,11 +137,9 @@ class MainHook : IXposedHookLoadPackage {
                 }
             } else {
                 try {
-                    XposedBridge.hookMethod(m, object : XC_MethodReplacement() {
-                        override fun replaceHookedMethod(param: MethodHookParam?): Any? {
-                            return getDefaultValue(ret)
-                        }
-                    })
+                    hook(m as Executable).intercept {
+                        getDefaultValue(ret)
+                    }
                     hookedOther++
                 } catch (_: Throwable) {
                     log("Phase3: failed hooking $className#$name")
@@ -156,7 +150,7 @@ class MainHook : IXposedHookLoadPackage {
         log("Phase3: NativeCronetProvider hooked: $hookedBool bool, $hookedOther other")
     }
 
-    private fun hookAppCronetBuilders(lpparam: LoadPackageParam) {
+    private fun hookAppCronetBuilders(classLoader: ClassLoader) {
         val candidates = arrayOf(
             $$"org.chromium.net.CronetEngine$Builder",
             $$"org.chromium.net.ExperimentalCronetEngine$Builder",
@@ -169,21 +163,21 @@ class MainHook : IXposedHookLoadPackage {
 
         var count = 0
         for (cls in candidates) {
-            val a = hookBuildMethodOnly(lpparam.classLoader, cls!!, "app")
-            val b = hookStaticFactories(lpparam.classLoader, cls)
+            val a = hookBuildMethodOnly(classLoader, cls, "app")
+            val b = hookStaticFactories(classLoader, cls)
             if (a || b) count++
         }
 
         log("Phase4: app-classloader Cronet classes hooked: $count")
     }
 
-    private fun dumpAndHookProviderHierarchy(lpparam: LoadPackageParam) {
-        walkHierarchy(lpparam, "org.chromium.net.impl.HttpEngineNativeProvider")
-        walkHierarchy(lpparam, "org.chromium.net.impl.NativeCronetProvider")
+    private fun dumpAndHookProviderHierarchy(classLoader: ClassLoader) {
+        walkHierarchy(classLoader, "org.chromium.net.impl.HttpEngineNativeProvider")
+        walkHierarchy(classLoader, "org.chromium.net.impl.NativeCronetProvider")
     }
 
-    private fun walkHierarchy(lpparam: LoadPackageParam, className: String?) {
-        val clazz = XposedHelpers.findClassIfExists(className, lpparam.classLoader) ?: return
+    private fun walkHierarchy(classLoader: ClassLoader, className: String) {
+        val clazz = findClass(classLoader, className) ?: return
 
         var parent: Class<*>? = clazz.superclass
         while (parent != null && parent != Any::class.java) {
@@ -208,15 +202,10 @@ class MainHook : IXposedHookLoadPackage {
                 val ret = m.returnType
                 if (shouldHookParentMethod(name, ret)) {
                     try {
-                        XposedBridge.hookMethod(m, object : XC_MethodReplacement() {
-                            override fun replaceHookedMethod(param: MethodHookParam?): Any? {
-                                log(
-                                    ("Phase5: blocked " + parentName + "#" + name
-                                            + "() ret=" + ret.name)
-                                )
-                                return getDefaultValue(ret)
-                            }
-                        })
+                        hook(m as Executable).intercept {
+                            log("Phase5: blocked $parentName#$name() ret=${ret.name}")
+                            getDefaultValue(ret)
+                        }
                         log("Phase5: hooked $parentName#$name()")
                     } catch (_: Throwable) {
                         // already hooked or abstract; ok
@@ -253,12 +242,6 @@ class MainHook : IXposedHookLoadPackage {
         return name.length <= 2 && ret != Void.TYPE && ret != Boolean::class.javaPrimitiveType
     }
 
-    // ==================== Utility ====================
-    /**
-     * Hook only build()/create() methods — NOT constructors.
-     * This allows the Builder to be constructed (so app code doesn't NPE on the builder itself),
-     * but .build() will throw, which is the standard "provider unavailable" signal.
-     */
     private fun hookBuildMethodOnly(cl: ClassLoader?, className: String, source: String?): Boolean {
         val clazz = findClass(cl, className) ?: return false
 
@@ -267,13 +250,11 @@ class MainHook : IXposedHookLoadPackage {
             val name = m.name
             if ("build" != name && "create" != name) continue
             try {
-                XposedBridge.hookMethod(m, object : XC_MethodReplacement() {
-                    override fun replaceHookedMethod(param: MethodHookParam?): Any? {
-                        log("BLOCKED: $className#$name() [$source]")
-                        logStackBrief()
-                        throw RuntimeException("Cronet disabled by VendingCronetOff")
-                    }
-                })
+                hook(m as Executable).intercept {
+                    log("BLOCKED: $className#$name() [$source]")
+                    logStackBrief()
+                    throw RuntimeException("Cronet disabled by VendingCronetOff")
+                }
                 hooked = true
                 log("hooked $className#$name() [$source]")
             } catch (_: Throwable) {
@@ -296,12 +277,10 @@ class MainHook : IXposedHookLoadPackage {
                 ) || lower.contains("instance")
             ) {
                 try {
-                    XposedBridge.hookMethod(m, object : XC_MethodReplacement() {
-                        override fun replaceHookedMethod(param: MethodHookParam?): Any? {
-                            log("BLOCKED static: $className#$name()")
-                            throw RuntimeException("Cronet disabled by VendingCronetOff")
-                        }
-                    })
+                    hook(m as Executable).intercept {
+                        log("BLOCKED static: $className#$name()")
+                        throw RuntimeException("Cronet disabled by VendingCronetOff")
+                    }
                     hooked = true
                     log("hooked static $className#$name()")
                 } catch (_: Throwable) {
@@ -313,13 +292,28 @@ class MainHook : IXposedHookLoadPackage {
     }
 
     private fun findClass(cl: ClassLoader?, className: String): Class<*>? {
-        if (cl != null) {
-            return XposedHelpers.findClassIfExists(className, cl)
-        }
         return try {
-            Class.forName(className)
+            if (cl != null) cl.loadClass(className) else Class.forName(className)
         } catch (_: ClassNotFoundException) {
             null
+        }
+    }
+
+    private fun log(msg: String) {
+        log(Log.INFO, TAG, msg)
+    }
+
+    private fun logStackBrief() {
+        try {
+            val st = Throwable().stackTrace
+            val sb = StringBuilder()
+            sb.append(TAG).append(": callstack:")
+            val n = min(15, st.size)
+            for (i in 2..<n) {
+                sb.append("\n  at ").append(st[i])
+            }
+            log(sb.toString())
+        } catch (_: Throwable) {
         }
     }
 
@@ -340,27 +334,7 @@ class MainHook : IXposedHookLoadPackage {
         }
 
         private fun isStandardObjectMethod(name: String?): Boolean {
-            return "equals" == name || "hashCode" == name || "toString" == name
-                    || "getClass" == name || "notify" == name || "notifyAll" == name
-                    || "wait" == name || "finalize" == name || "clone" == name
-        }
-
-        private fun log(msg: String?) {
-            XposedBridge.log("$TAG: $msg")
-        }
-
-        private fun logStackBrief() {
-            try {
-                val st = Throwable().stackTrace
-                val sb = StringBuilder()
-                sb.append(TAG).append(": callstack:")
-                val n = min(15, st.size)
-                for (i in 2..<n) {
-                    sb.append("\n  at ").append(st[i])
-                }
-                XposedBridge.log(sb.toString())
-            } catch (_: Throwable) {
-            }
+            return "equals" == name || "hashCode" == name || "toString" == name || "getClass" == name || "notify" == name || "notifyAll" == name || "wait" == name || "finalize" == name || "clone" == name
         }
     }
 }
