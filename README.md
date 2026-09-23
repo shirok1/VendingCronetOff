@@ -16,13 +16,13 @@ Work around a buggy ROM-provided APEX Cronet (not bundled in Google Play Store) 
 ## Requirements
 - Android 14+ (recommended; APEX Cronet path). May still help on older versions.
 - LSPosed / Xposed framework.
-- Scope: `com.android.vending` only.
+- Scope: `com.android.vending` (recommended by default, but any application using Cronet can be selected).
 
 ## Installation
 1. Build and install the module APK.
 2. Enable the module in LSPosed.
-3. Scope it to `com.android.vending`.
-4. Force-stop Play Store and reopen it.
+3. Scope it to `com.android.vending` (recommended) or any other app encountering Cronet crashes.
+4. Force-stop the target app and reopen it.
 
 ## Usage
 No UI. The module works in the background once enabled.

@@ -10,7 +10,7 @@ import java.util.Locale
 import kotlin.math.min
 
 /**
- * Disable Play Store's Cronet path in com.android.vending.
+ * Disable Cronet path in hooked packages (e.g. com.android.vending).
  *
  * This module avoids crashes from ROM/APEX Cronet (e.g. /apex/.../libcronet.*.so)
  * by blocking HttpEngine/Cronet provider entry points and forcing fallback transport.
@@ -18,11 +18,7 @@ import kotlin.math.min
 class MainHook : XposedModule() {
 
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
-        if ("com.android.vending" != param.packageName) {
-            return
-        }
-
-        log("hooking com.android.vending (pid=" + Process.myPid() + ")")
+        log("hooking ${param.packageName} (pid=${Process.myPid()})")
 
         hookHttpEngineBuild()
 
