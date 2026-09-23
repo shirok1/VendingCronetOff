@@ -27,6 +27,11 @@ Work around a buggy ROM-provided APEX Cronet (not bundled in Google Play Store) 
 ## Usage
 No UI. The module works in the background once enabled.
 
+## CI builds
+The **Android CI** GitHub Actions workflow runs on pushes to `main`, pull requests, and manual dispatch.
+It uses Zulu JDK 17 to build the debug APK and run Android lint and available unit tests.
+Download the APK and diagnostic reports from the workflow run's **Artifacts** section; artifacts are retained for 14 days.
+
 ## Notes
 - On some devices/ROMs (for example HyperOS 1.0.15.0.UKKCNXM on Redmi K40 Pro), the buggy `libcronet.so` comes from the ROM APEX package, not from `com.android.vending`.
 - HyperOS 1.0.15.0.UKKCNXM on Redmi K40 Pro may be in late maintenance (near end-of-support), so APEX Cronet fixes may not arrive quickly.
@@ -79,4 +84,3 @@ backtrace:
 ```
 
 </details>
-
