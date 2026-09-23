@@ -1,4 +1,4 @@
-package com.sxx.vendingcronetoff
+package dev.shirok1.vendingcronetoff
 
 import android.os.Process
 import android.util.Log

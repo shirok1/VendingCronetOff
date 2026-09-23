@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.sxx.vendingcronetoff'
+    namespace 'dev.shirok1.vendingcronetoff'
     compileSdk 37
 
     defaultConfig {
-        applicationId "com.sxx.vendingcronetoff"
+        applicationId "dev.shirok1.vendingcronetoff"
         minSdk 26
         targetSdk 37
         versionCode 1
