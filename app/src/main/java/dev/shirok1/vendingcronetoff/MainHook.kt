@@ -2,6 +2,7 @@ package dev.shirok1.vendingcronetoff
 
 import android.os.Process
 import android.util.Log
+import io.github.libxposed.api.XposedInterface.ExceptionMode
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Executable
@@ -246,7 +247,8 @@ class MainHook : XposedModule() {
             val name = m.name
             if ("build" != name && "create" != name) continue
             try {
-                hook(m as Executable).intercept {
+                // Propagate intentional failures so the framework cannot run the blocked method.
+                hook(m as Executable).setExceptionMode(ExceptionMode.PASSTHROUGH).intercept {
                     log("BLOCKED: $className#$name() [$source]")
                     logStackBrief()
                     throw RuntimeException("Cronet disabled by VendingCronetOff")
@@ -273,7 +275,7 @@ class MainHook : XposedModule() {
                 ) || lower.contains("instance")
             ) {
                 try {
-                    hook(m as Executable).intercept {
+                    hook(m as Executable).setExceptionMode(ExceptionMode.PASSTHROUGH).intercept {
                         log("BLOCKED static: $className#$name()")
                         throw RuntimeException("Cronet disabled by VendingCronetOff")
                     }
